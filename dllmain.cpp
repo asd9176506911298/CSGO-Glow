@@ -13,6 +13,7 @@ struct values
     uintptr_t localPlayer;
     uintptr_t moduleBase;
     uintptr_t glowObject;
+    uintptr_t engine;
 }val;
 
 struct GlowStruct
@@ -27,6 +28,14 @@ struct GlowStruct
     bool renderWhenUnOccluded; //0x0029
     char pad_002A[14]; //0x002A
 };
+
+struct ClrRender
+{
+    BYTE red, green, blue;
+};
+
+ClrRender ClrTeam;
+ClrRender ClrEnemy;
 
 GlowStruct SetGlowColor(GlowStruct Glow, uintptr_t entity)
 {
@@ -82,11 +91,32 @@ void HandleGlow()
             int glowIndex = *(int*)(entity + m_iGlowIndex);
             int entityTeam = *(int*)(entity + m_iTeamNum);
             if (myTeam == entityTeam)
+            { 
+                *(ClrRender*)(entity + m_clrRender) = ClrTeam;
                 SetTeamGlow(entity, glowIndex);
+            }
             else
+            {
+                *(ClrRender*)(entity + m_clrRender) = ClrEnemy;
                 SetEnemyGlow(entity, glowIndex);
+            }
         }
     }
+}
+
+void SetBrightness()
+{
+    ClrTeam.red = 0;
+    ClrTeam.green = 0;
+    ClrTeam.blue = 255;
+
+    ClrEnemy.red = 255;
+    ClrEnemy.green = 0;
+    ClrEnemy.blue = 0;
+
+    float birghtness = 5.0f;
+    int ptr = (int)(val.engine + model_ambient_min);
+    *(int*)(val.engine + model_ambient_min) = *(int*)&birghtness ^ ptr;
 }
 
 DWORD WINAPI HackThread(HMODULE hModule)
@@ -96,11 +126,14 @@ DWORD WINAPI HackThread(HMODULE hModule)
     freopen_s(&f, "CONOUT$", "w", stdout);
 
     val.moduleBase = (uintptr_t)GetModuleHandle(L"client.dll");
+    val.engine = (uintptr_t)GetModuleHandle(L"engine.dll");
     val.localPlayer = *(uintptr_t*)(val.moduleBase + dwLocalPlayer);
 
     if(val.localPlayer == NULL)
         while(val.localPlayer == NULL)
             val.localPlayer = *(uintptr_t*)(val.moduleBase + dwLocalPlayer);
+
+    SetBrightness();
 
     while (!GetAsyncKeyState(VK_END))
     {
