@@ -3,22 +3,91 @@
 #include "mem.h"
 #include <Windows.h>
 #include <iostream>
+#include "csgo.hpp"
 
-struct gameOffsets
-{
-    uintptr_t dwLocalPlayer = 0xDBF4CC;
-    uintptr_t dwEntityList = 0x4DDB92C;
-    uintptr_t dwGlowObjectManager = 0x5324588;
-    uintptr_t m_iGlowIndex = 0x10488;
-    uintptr_t m_iTeamNum = 0xF4;
-
-}offsets;
+using namespace hazedumper::netvars;
+using namespace hazedumper::signatures;
 
 struct values
 {
     uintptr_t localPlayer;
     uintptr_t moduleBase;
+    uintptr_t glowObject;
 }val;
+
+struct GlowStruct
+{
+    char pad_0000[8]; //0x0000
+    float red; //0x0008
+    float green; //0x000C
+    float blue; //0x0010
+    float alpha; //0x0014
+    char pad_0018[16]; //0x0018
+    bool renderWhenOccluded; //0x0028
+    bool renderWhenUnOccluded; //0x0029
+    char pad_002A[14]; //0x002A
+};
+
+GlowStruct SetGlowColor(GlowStruct Glow, uintptr_t entity)
+{
+    bool defusing = *(bool*)(entity + m_bIsDefusing);
+    if (defusing)
+    {
+        Glow.red = 1.0f;
+        Glow.green = 1.0f;
+        Glow.blue = 1.0f;
+        Glow.alpha = 1.0f;
+    }
+    else
+    { 
+        int health = *(int*)(entity + m_iHealth);
+        Glow.red = health * - 0.01 + 1;
+        Glow.green = health * 0.01;
+        Glow.alpha = 1.0f;
+    }
+    Glow.renderWhenOccluded = true;
+    Glow.renderWhenUnOccluded = false;
+    return Glow;
+}
+
+void SetTeamGlow(uintptr_t entity, int glowIndex)
+{
+    GlowStruct TGlow;
+    TGlow = *(GlowStruct*)(val.glowObject + (glowIndex * 0x38));
+    TGlow.blue = 1.0f;
+    TGlow.alpha = 1.0f;
+    TGlow.renderWhenOccluded = true;
+    TGlow.renderWhenUnOccluded = false;
+    *(GlowStruct*)(val.glowObject + (glowIndex * 0x38)) = TGlow;
+}
+
+void SetEnemyGlow(uintptr_t entity, int glowIndex)
+{
+    GlowStruct EGlow;
+    EGlow = *(GlowStruct*)(val.glowObject + (glowIndex * 0x38));
+    EGlow = SetGlowColor(EGlow, entity);
+    *(GlowStruct*)(val.glowObject + (glowIndex * 0x38)) = EGlow;
+}
+
+void HandleGlow()
+{
+    val.glowObject = *(uintptr_t*)(val.moduleBase + dwGlowObjectManager);
+    int myTeam = *(int*)(val.localPlayer + m_iTeamNum);
+
+    for (int i = 0; i < 64; i++)
+    {
+        uintptr_t entity = *(uintptr_t*)(val.moduleBase + dwEntityList + i * 0x10);
+        if (entity != NULL)
+        {
+            int glowIndex = *(int*)(entity + m_iGlowIndex);
+            int entityTeam = *(int*)(entity + m_iTeamNum);
+            if (myTeam == entityTeam)
+                SetTeamGlow(entity, glowIndex);
+            else
+                SetEnemyGlow(entity, glowIndex);
+        }
+    }
+}
 
 DWORD WINAPI HackThread(HMODULE hModule)
 {
@@ -27,41 +96,15 @@ DWORD WINAPI HackThread(HMODULE hModule)
     freopen_s(&f, "CONOUT$", "w", stdout);
 
     val.moduleBase = (uintptr_t)GetModuleHandle(L"client.dll");
-    val.localPlayer = *(uintptr_t*)(val.moduleBase + offsets.dwLocalPlayer);
+    val.localPlayer = *(uintptr_t*)(val.moduleBase + dwLocalPlayer);
 
     if(val.localPlayer == NULL)
         while(val.localPlayer == NULL)
-            val.localPlayer = *(uintptr_t*)(val.moduleBase + offsets.dwLocalPlayer);
+            val.localPlayer = *(uintptr_t*)(val.moduleBase + dwLocalPlayer);
 
     while (!GetAsyncKeyState(VK_END))
     {
-        uintptr_t glowObject = *(uintptr_t*)(val.moduleBase + offsets.dwGlowObjectManager);
-        int myTeam = *(int*)(val.localPlayer + offsets.m_iTeamNum);
-
-        for (int i = 0; i < 64; i++)
-        {
-            uintptr_t entity = *(uintptr_t*)(val.moduleBase + offsets.dwEntityList + i * 0x10);
-            if(entity != NULL)
-            {
-                int glowIndex = *(int*)(entity + offsets.m_iGlowIndex);
-                int entityTeam = *(int*)(entity + offsets.m_iTeamNum);
-                if (myTeam == entityTeam)
-                {
-                    *(float*)(glowObject + glowIndex * 0x38 + 0x8) = 0.0f;
-                    *(float*)(glowObject + glowIndex * 0x38 + 0xC) = 0.0f;
-                    *(float*)(glowObject + glowIndex * 0x38 + 0x10) = 2.0f;
-                    *(float*)(glowObject + glowIndex * 0x38 + 0x14) = 1.7f;
-                }
-                else
-                {
-                    *(float*)(glowObject + glowIndex * 0x38 + 0x8) = 2.0f;
-                    *(float*)(glowObject + glowIndex * 0x38 + 0xC) = 0.0f;
-                    *(float*)(glowObject + glowIndex * 0x38 + 0x10) = 0.0f;
-                    *(float*)(glowObject + glowIndex * 0x38 + 0x14) = 1.7f;
-                }
-                *(int*)(glowObject + glowIndex * 0x38 + 0x28) = 1;
-            }
-        }
+        HandleGlow();
 
         Sleep(1);
     }
